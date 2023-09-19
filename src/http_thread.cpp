@@ -633,7 +633,7 @@ namespace app {
 
 											bool ok = true;
 
-											if (method == "GET")
+											if (method == "GET" && conn->fio_ctx.size > 0)
 											{
 												if (!server.file_read(conn))
 												{
@@ -643,13 +643,17 @@ namespace app {
 												}
 												else
 												{
+													log(L"Info: http_sever::file_read() start.");
 													conn->fio_ctx.sending = true;
 												}
+											}
+											else if (conn->fio_ctx.size == 0)
+											{
+												server.file_close(conn);
 											}
 
 											if (ok)
 											{
-												log(L"Info: http_sever::file_read() start.");
 												res = "HTTP/1.1 200 OK\r\n";
 												res += "Content-Type: " + get_content_type(path) + "\r\n";
 												res += "Content-Length: " + std::to_string(conn->fio_ctx.size) + "\r\n";

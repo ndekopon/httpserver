@@ -1,0 +1,7 @@
+/obj
+/bin
+/lib/*
+/include/*
+/ref/*
+*.user
+/.vs

@@ -26,7 +26,7 @@ namespace app {
 		SOCKADDR_IN* l;
 		SOCKADDR_IN* r;
 		INT llen = sizeof(SOCKADDR_IN);
-		INT rlen = sizeof(SOCKADDR_IN); r->sin_addr;
+		INT rlen = sizeof(SOCKADDR_IN);
 		::GetAcceptExSockaddrs(_buffer, _len, llen + 16, rlen + 16, reinterpret_cast<sockaddr **>(&l), &llen, reinterpret_cast<sockaddr**>(&r), &rlen);
 
 		::WSAAddressToStringW((SOCKADDR *)r, rlen, NULL, s, &slen);
@@ -300,7 +300,7 @@ namespace app {
 		{
 			return false;
 		}
-		log(L"Info: sock=%d open file handle = %d", _conn->sock, ctx.file);
+		log(L"Info: sock=%d open file handle = %p", _conn->sock, ctx.file);
 
 		std::memset(&ctx.ov, 0, sizeof(OVERLAPPED));
 
@@ -356,7 +356,7 @@ namespace app {
 		{
 			::CancelIo(ctx.file);
 			::CloseHandle(ctx.file);
-			log(L"Info: sock=%d close file handle = %d", _conn->sock, ctx.file);
+			log(L"Info: sock=%d close file handle = %p", _conn->sock, ctx.file);
 		}
 		ctx.file = INVALID_HANDLE_VALUE;
 	}

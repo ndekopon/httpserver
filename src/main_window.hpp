@@ -23,7 +23,6 @@ namespace app
 		static const LONG window_width_;
 		static const LONG window_height_;
 
-		void disable_ime();
 		void set_dpi_awareness();
 		ATOM register_window_class();
 		bool create_window();

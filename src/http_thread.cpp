@@ -57,6 +57,7 @@ namespace {
 		{"vtt", "text/vtt"},
 		{"html", "text/html"},
 		{"htm", "text/html"},
+		{"wgsl", "text/wgsl"},
 		{"apng", "image/apng"},
 		{"avif", "image/avif"},
 		{"bmp", "image/bmp"},
@@ -477,11 +478,16 @@ namespace app {
 
 			while (true)
 			{
-				DWORD transferred;
-				ULONG_PTR compkey;
-				LPOVERLAPPED ov;
+				DWORD transferred = 0;
+				ULONG_PTR compkey = 0;
+				LPOVERLAPPED ov = NULL;
 				auto rc = ::GetQueuedCompletionStatus(compport_, &transferred, &compkey, &ov, INFINITE);
-				if (rc == FALSE) continue;
+				auto gqcs_error = rc == FALSE ? ::GetLastError() : ERROR_SUCCESS;
+				if (rc == FALSE && ov == NULL)
+				{
+					log(L"Error: GetQueuedCompletionStatus() failed. ErrorCode=%d", gqcs_error);
+					continue;
+				}
 
 				if (compkey == COMPKEY_OPERATION && ov == NULL)
 				{
@@ -501,32 +507,48 @@ namespace app {
 					// ACCEPT
 					HTTP_ACCEPT_CONTEXT *ctx = (HTTP_ACCEPT_CONTEXT*)ov;
 					SOCKET sock = ctx->sock;
+
+					if (rc == FALSE)
+					{
+						log(L"Error: ACCEPT completion failed. ErrorCode=%d", gqcs_error);
+						if (sock != INVALID_SOCKET)
+						{
+							::closesocket(sock);
+						}
+						if (!server.tcp_acceptex())
+						{
+							log(L"Error: websocket_server::acceptex() failed.");
+							break;
+						}
+						continue;
+					}
+
 					auto ipport = get_remote_ipport(ctx->data, transferred);
-					log(L"Info: connected from %s.", ipport.c_str());
+					log(L"Info: sock=%d connected from %s", sock, ipport.c_str());
 
 					if (!server.tcp_acceptex())
 					{
-						log(L"Error: http_server::tcp_acceptex() failed.");
+						log(L"Error: sock=%d http_server::tcp_acceptex() failed.", sock);
 						break;
 					}
 
 					auto conn = server.insert(sock);
 					if (conn == nullptr)
 					{
-						log(L"Error: reached max connection.");
+						log(L"Error: sock=%d reached max connection.", sock);
 						server.connection_close(conn);
 						continue;
 					}
 
 					// 接続元の表示
-					log(L"Info: ACCEPT called. sock=%d.", conn->sock);
+					log(L"Info: sock=%d ACCEPT called", conn->sock);
 
 					::CreateIoCompletionPort((HANDLE)conn->sock, compport_, COMPKEY_TCP_READWRITE, 0);
 
 					// 読込待ち
 					if (!server.tcp_read(conn))
 					{
-						log(L"Error: websocket_server::read() failed.");
+						log(L"Error: sock=%d websocket_server::read() failed", conn->sock);
 					}
 				}
 				if (compkey == COMPKEY_TCP_READWRITE && ov != NULL)
@@ -534,10 +556,18 @@ namespace app {
 					HTTP_IO_CONTEXT* ctx = (HTTP_IO_CONTEXT*)ov;
 					http_conn_t* conn = ctx->conn;
 
+					if (rc == FALSE)
+					{
+						log(L"Error: socket I/O completion failed. sock=%d,type=%d,ErrorCode=%d", conn->sock, ctx->type, gqcs_error);
+						server.file_close(conn);
+						server.connection_close(conn);
+						continue;
+					}
+
 					if (transferred == 0 && (ctx->type == HTTP_TCP_RECV || ctx->type == HTTP_TCP_SEND))
 					{
 						// IO完了かつ転送バイト0は終了
-						server.connection_close(ctx->conn);
+						server.connection_close(conn);
 					}
 					else if (ctx->type == HTTP_TCP_RECV)
 					{
@@ -554,9 +584,9 @@ namespace app {
 							// ログに表示
 							log(L"Info: sock=%d << %s %s %s", conn->sock, s_to_ws(method).c_str(), s_to_ws(request).c_str(), s_to_ws(version).c_str());
 							for (auto const& kv : kvs)
-							{
-								log(L"Info: sock=%d << %s: %s", conn->sock, s_to_ws(kv.first).c_str(), s_to_ws(kv.second).c_str());
-							}
+							// {
+							// log(L"Info: sock=%d << %s: %s", conn->sock, s_to_ws(kv.first).c_str(), s_to_ws(kv.second).c_str());
+							// }
 
 							// ヘッダ未返送
 							conn->headersent = false;
@@ -573,6 +603,7 @@ namespace app {
 
 							if (version != "HTTP/1.1")
 							{
+								log(L"Info: sock=%d >> HTTP/1.1 505 HTTP Version Not Supported", conn->sock);
 								const std::string res = 
 									version + " 505 HTTP Version Not Supported\r\n"
 									"X-Server-Message: Only support HTTP/1.1.\r\n"
@@ -588,6 +619,7 @@ namespace app {
 							}
 							else if (method != "GET" && method != "HEAD")
 							{
+								log(L"Info: sock=%d >> HTTP/1.1 405 Method Not Allowed", conn->sock);
 								const std::string res =
 									"HTTP/1.1 405 Method Not Allowed\r\n"
 									"Allow: GET, HEAD\r\n"
@@ -597,7 +629,7 @@ namespace app {
 								conn->keepalive = false;
 								if (!server.tcp_send(conn, res))
 								{
-									log(L"Error: http_sever::tcp_send() failed.");
+									log(L"Error: sock=%d http_sever::tcp_send() failed", conn->sock);
 									server.connection_close(conn);
 								}
 							}
@@ -607,6 +639,7 @@ namespace app {
 								auto absolutepath = get_absolute_path(request);
 								if (absolutepath == "")
 								{
+									log(L"Info: sock=%d >> HTTP/1.1 400 Bad Request", conn->sock);
 									res =
 										"HTTP/1.1 400 Bad Request\r\n"
 										"Content-Length: 0\r\n"
@@ -621,9 +654,9 @@ namespace app {
 									}
 									auto path = htdocs_path + absolute_path_to_winpath(absolutepath);
 									auto exists = is_file(path);
-									log(L"Info: sock=%d absolutepath=%s", conn->sock, s_to_ws(absolutepath).c_str());
-									log(L"Info: sock=%d path=%s", conn->sock, path.c_str());
-									log(L"Info: sock=%d exists=%s", conn->sock, exists ? L"true" : L"false");
+									// log(L"Info: sock=%d absolutepath=%s", conn->sock, s_to_ws(absolutepath).c_str());
+									// log(L"Info: sock=%d path=%s", conn->sock, path.c_str());
+									// log(L"Info: sock=%d exists=%s", conn->sock, exists ? L"true" : L"false");
 
 									if (exists)
 									{
@@ -637,13 +670,12 @@ namespace app {
 											{
 												if (!server.file_read(conn))
 												{
-													log(L"Error: http_sever::file_read() failed.");
+													log(L"Error: sock=%d http_sever::file_read() failed", conn->sock);
 													server.file_close(conn);
 													ok = false;
 												}
 												else
 												{
-													log(L"Info: http_sever::file_read() start.");
 													conn->fio_ctx.sending = true;
 												}
 											}
@@ -654,9 +686,11 @@ namespace app {
 
 											if (ok)
 											{
+												log(L"Info: sock=%d >> HTTP/1.1 200 OK", conn->sock);
 												res = "HTTP/1.1 200 OK\r\n";
 												res += "Content-Type: " + get_content_type(path) + "\r\n";
 												res += "Content-Length: " + std::to_string(conn->fio_ctx.size) + "\r\n";
+												res += "Cache-Control: no-store\r\n";
 												res += "\r\n";
 											}
 
@@ -670,6 +704,7 @@ namespace app {
 
 									if (res == "")
 									{
+										log(L"Info: sock=%d >> HTTP/1.1 404 Not Found", conn->sock);
 										res =
 											"HTTP/1.1 404 Not Found\r\n"
 											"Content-Length: 0\r\n"
@@ -678,7 +713,7 @@ namespace app {
 								}
 								if (!server.tcp_send(conn, res))
 								{
-									log(L"Error: http_sever::tcp_send() failed.");
+									log(L"Error: sock=%d http_sever::tcp_send() failed", conn->sock);
 									server.connection_close(conn);
 								}
 							}
@@ -686,7 +721,7 @@ namespace app {
 							// 読込待ち
 							if (!server.tcp_read(conn))
 							{
-								log(L"Error: http_server::tcp_read() failed.");
+								log(L"Error: sock=%d http_server::tcp_read() failed", conn->sock);
 								server.connection_close(conn);
 							}
 						}
@@ -712,7 +747,10 @@ namespace app {
 						{
 							if (!server.tcp_send_file(conn))
 							{
-								log(L"Error: http_server::tcp_send_file() failed.");
+								if (conn->sock >= 0)
+								{
+									log(L"Error: sock=%d http_server::tcp_send_file() failed", conn->sock);
+								}
 								server.connection_close(conn);
 							}
 						}
@@ -724,7 +762,10 @@ namespace app {
 							{
 								if (!server.file_read(conn))
 								{
-									log(L"Error: http_server::file_read() failed.");
+									if (conn->sock >= 0)
+									{
+										log(L"Error: sock=%d http_server::file_read() failed", conn->sock);
+									}
 									server.connection_close(conn);
 								}
 							}
@@ -743,7 +784,19 @@ namespace app {
 				if (compkey == COMPKEY_FILE_READ && ov != NULL)
 				{
 					FILE_IO_CONTEXT* ctx = (FILE_IO_CONTEXT*)ov;
+
 					http_conn_t* conn = ctx->conn;
+
+					if (rc == FALSE)
+					{
+						if (gqcs_error != ERROR_HANDLE_EOF)
+						{
+							log(L"Error: file read completion failed. sock=%d, ErrorCode=%d", conn->sock, gqcs_error);
+							server.file_close(conn);
+							server.connection_close(conn);
+						}
+						continue;
+					}
 
 					const DWORD read_index = (ctx->read_count % 2);
 					ctx->transferred.at(read_index) = transferred;
@@ -760,7 +813,7 @@ namespace app {
 						// 次のファイル読込
 						if (!server.file_read(conn))
 						{
-							log(L"Error: http_server::file_read() failed.");
+							log(L"Error: sock=%d http_server::file_read() failed", conn->sock);
 							server.connection_close(conn);
 						}
 					}
@@ -772,7 +825,7 @@ namespace app {
 						{
 							if (!server.tcp_send_file(conn))
 							{
-								log(L"Error: http_server::tcp_send_file() failed.");
+								log(L"Error: sock=%d http_server::tcp_send_file() failed", conn->sock);
 								server.connection_close(conn);
 							}
 						}
@@ -781,7 +834,7 @@ namespace app {
 					// 読込が完了した
 					if (ctx->size == ctx->total_read)
 					{
-						log(L"Info: sock=%d file read complete.", conn->sock);
+						log(L"Info: sock=%d file read complete", conn->sock);
 						server.file_close(conn);
 					}
 				}

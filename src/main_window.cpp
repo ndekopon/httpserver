@@ -2,12 +2,10 @@
 
 #include "log.hpp"
 
-#include <imm.h>
-#include <commctrl.h>
+// #include <commctrl.h>
 
-#pragma comment(lib, "imm32.lib")
-#pragma comment(lib, "Ws2_32.lib")
-#pragma comment(lib, "Comctl32.lib")
+// #pragma comment(lib, "Ws2_32.lib")
+// #pragma comment(lib, "Comctl32.lib")
 
 namespace
 {
@@ -47,8 +45,6 @@ namespace app
 			return false;
 		}
 
-		disable_ime();
-
 		set_dpi_awareness();
 
 		// create window
@@ -70,11 +66,6 @@ namespace app
 			::DispatchMessageW(&message);
 		}
 		return (int)message.wParam;
-	}
-
-	void main_window::disable_ime()
-	{
-		::ImmDisableIME(-1);
 	}
 
 	void main_window::set_dpi_awareness()
@@ -128,7 +119,7 @@ namespace app
 	HWND main_window::create_edit(HMENU _id, DWORD _x, DWORD _y, DWORD _w, DWORD _h, HFONT _font)
 	{
 		HWND edit = ::CreateWindowExW(
-			0, WC_EDITW, L"",
+			0, L"Edit", L"",
 			WS_CHILD | WS_VISIBLE | WS_BORDER | ES_MULTILINE | WS_VSCROLL | WS_HSCROLL | ES_AUTOHSCROLL | ES_AUTOVSCROLL | ES_READONLY,
 			_x, _y, _w, _h, window_, (HMENU)_id, instance_, NULL);
 		if (edit)

@@ -300,7 +300,7 @@ namespace app {
 		{
 			return false;
 		}
-		log(L"Info: sock=%d handle=%p open", _conn->sock, ctx.file);
+		log(L"Info: sock=%llu handle=%p open", _conn->sock, ctx.file);
 
 		std::memset(&ctx.ov, 0, sizeof(OVERLAPPED));
 
@@ -311,7 +311,7 @@ namespace app {
 			return false;
 		}
 		ctx.size = size.QuadPart;
-		log(L"Info: sock=%d handle=%p size=%llu", _conn->sock, ctx.file, ctx.size);
+		log(L"Info: sock=%llu handle=%p size=%llu", _conn->sock, ctx.file, ctx.size);
 
 		ctx.read_count = 0;
 		ctx.sent_count = 0;
@@ -356,7 +356,7 @@ namespace app {
 		{
 			::CancelIo(ctx.file);
 			::CloseHandle(ctx.file);
-			log(L"Info: sock=%d handle=%p close file", _conn->sock, ctx.file);
+			log(L"Info: sock=%llu handle=%p close file", _conn->sock, ctx.file);
 		}
 		ctx.file = INVALID_HANDLE_VALUE;
 	}
@@ -367,7 +367,7 @@ namespace app {
 
 		if (_conn->sock != INVALID_SOCKET)
 		{
-			log(L"Info: sock=%d close socket", _conn->sock);
+			log(L"Info: sock=%llu close socket", _conn->sock);
 			::closesocket(_conn->sock);
 			_conn->sock = INVALID_SOCKET;
 		}
